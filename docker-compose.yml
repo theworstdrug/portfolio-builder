@@ -1,0 +1,14 @@
+services:
+  portfolio:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      ADMIN_PASSWORD: "change-me"
+      MAX_UPLOAD_MB: "1024"
+      # Set both to "true" once you're behind HTTPS (Caddy/nginx):
+      SECURE_COOKIE: "false"
+      TRUST_PROXY: "false"
+    volumes:
+      - ./data:/data

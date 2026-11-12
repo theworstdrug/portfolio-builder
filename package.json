@@ -1,0 +1,16 @@
+{
+  "name": "portfolio-builder",
+  "version": "1.0.0",
+  "description": "Minimal self-hosted portfolio with a looping carousel menu, pop-up windows and a small admin for media + tags.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.2"
+  }
+}

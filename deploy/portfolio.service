@@ -1,0 +1,22 @@
+# systemd unit for running without Docker.
+# 1. copy the repo to /opt/portfolio and run `npm ci --omit=dev`
+# 2. sudo cp deploy/portfolio.service /etc/systemd/system/
+# 3. edit ADMIN_PASSWORD below, then: sudo systemctl enable --now portfolio
+[Unit]
+Description=Portfolio site
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/portfolio
+ExecStart=/usr/bin/node server.js
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+Environment=DATA_DIR=/opt/portfolio/data
+Environment=ADMIN_PASSWORD=change-me
+Environment=SECURE_COOKIE=true
+Environment=TRUST_PROXY=true
+Restart=always
+User=www-data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+# Caddy gives you automatic HTTPS. Replace the domain, then: sudo caddy run --config deploy/Caddyfile
+example.com {
+	encode zstd gzip
+	request_body {
+		max_size 1GB
+	}
+	reverse_proxy 127.0.0.1:3000
+}

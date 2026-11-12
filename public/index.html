@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Portfolio</title>
+  <meta name="description" content="">
+  <link rel="stylesheet" href="/css/site.css">
+</head>
+<body>
+  <!-- Plain list of sections for screen readers / no-JS. The visual carousel is built by site.js. -->
+  <nav class="sr-only" id="sr-nav" aria-label="Sections"></nav>
+
+  <main class="menu" id="menu" aria-hidden="true">
+    <div class="track" id="track"></div>
+    <div class="probe item" id="probe">Mg</div>
+  </main>
+
+  <aside class="panel" id="panel" aria-labelledby="panel-title">
+    <header class="panel-bar">
+      <span id="panel-title"></span>
+      <button class="link" id="panel-close" type="button">(Close)</button>
+    </header>
+    <div class="panel-body" id="panel-body" tabindex="-1"></div>
+  </aside>
+
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="link lb-close" type="button" data-lb="close">(Close)</button>
+    <button class="link lb-prev" type="button" data-lb="prev">(Prev)</button>
+    <button class="link lb-next" type="button" data-lb="next">(Next)</button>
+    <div class="lb-stage" id="lb-stage"></div>
+    <div class="lb-caption" id="lb-caption"></div>
+  </div>
+
+  <footer class="foot" id="foot"></footer>
+
+  <noscript><p style="padding:1rem">This site needs JavaScript for its menu.</p></noscript>
+  <script src="/js/site.js"></script>
+</body>
+</html>
