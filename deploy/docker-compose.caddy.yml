@@ -1,0 +1,31 @@
+# Alternative: Caddy in front handles HTTPS, the app runs plain HTTP.
+#   docker compose -f deploy/docker-compose.caddy.yml --project-directory . up -d --build
+# In .env set TLS_MODE=off and DOMAIN=example.com, www.example.com
+services:
+  portfolio:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TLS_MODE: "off"
+      TRUST_PROXY: "true"
+    volumes:
+      - ./data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [portfolio]
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+      UPSTREAM: portfolio:3000
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1024}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

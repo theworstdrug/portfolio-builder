@@ -50,6 +50,10 @@
     data = json;
     applySite();
     buildEntries();
+    if (!entries.length) {
+      track.replaceChildren(h('div', { class: 'item is-active', style: 'transform:translateY(-50%)' }, 'Hello.'));
+      $('#foot').prepend(h('a', { href: '/admin' }, 'New site: set it up at /admin'));
+    }
     buildCarousel();
     route(true);
     requestAnimationFrame(tick);
@@ -122,6 +126,7 @@
     const copies = Math.max(1, Math.ceil(needed / n));
     slots = n * copies;
     els = [];
+    if (!entries.length) return;
     track.replaceChildren();
     for (let i = 0; i < slots; i++) {
       const e = entries[i % n];

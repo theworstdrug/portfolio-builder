@@ -5,5 +5,5 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY . .
 VOLUME /data
-EXPOSE 3000
+EXPOSE 80 443 3000
 CMD ["node", "server.js"]

@@ -1,0 +1,108 @@
+# Builds a ready-to-run bundle and publishes it as a GitHub Release.
+#
+#   Release from a tag:  git tag v1.0.0 && git push origin v1.0.0
+#   Or manually:         Actions → Release → Run workflow → enter a version (creates the tag)
+#
+# The bundle includes production node_modules, so a server only needs Node 18+
+# (or Docker). It ships with no content: the site starts as a blank slate.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. v1.0.0 (a tag is created if it does not exist)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          TAG="${INPUT_VERSION:-$GITHUB_REF_NAME}"
+          case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version must look like v1.2.3 (got $TAG)"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "name=portfolio-$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Sanity check
+        run: |
+          npm ci
+          for f in server.js tls.js public/js/*.js public/admin/admin.js; do node --check "$f"; done
+          # boots with no data and serves an empty site
+          DATA_DIR="$RUNNER_TEMP/smoke" ADMIN_PASSWORD=smoke PORT=3999 node server.js & PID=$!
+          for i in $(seq 1 20); do curl -fs localhost:3999/api/content > "$RUNNER_TEMP/c.json" && break; sleep 0.5; done
+          kill $PID
+          node -e 'const c=require(process.argv[1]); if (c.sections.length) { console.error("expected blank content"); process.exit(1) }' "$RUNNER_TEMP/c.json"
+
+      - name: Build bundle
+        env:
+          NAME: ${{ steps.v.outputs.name }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          OUT="dist/$NAME"
+          mkdir -p "$OUT"
+          cp -r server.js tls.js package.json package-lock.json public deploy \
+                Dockerfile .dockerignore docker-compose.yml .env.example README.md "$OUT"/
+          # stamp the version, install production deps only
+          (cd "$OUT" && npm pkg set version="$VERSION" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
+          # never ship content, uploads, passwords or certificates
+          rm -rf "$OUT/data" "$OUT/.env"
+          cd dist
+          tar -czf "$NAME.tar.gz" "$NAME"
+          zip -qr "$NAME.zip" "$NAME"
+          sha256sum "$NAME.tar.gz" "$NAME.zip" > SHA256SUMS.txt
+          ls -lh
+
+      - name: Write release notes
+        env:
+          NAME: ${{ steps.v.outputs.name }}
+          TAG: ${{ steps.v.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > dist/NOTES.md <<NOTES
+          ## Install
+
+          \`\`\`bash
+          curl -LO https://github.com/$REPO/releases/download/$TAG/$NAME.tar.gz
+          tar xzf $NAME.tar.gz && cd $NAME
+          cp .env.example .env    # set TLS_MODE, DOMAIN, LETSENCRYPT_EMAIL, ADMIN_PASSWORD
+          docker compose up -d --build        # or: node server.js   (Node 18+, deps included)
+          \`\`\`
+
+          Then open \`https://<your domain>/admin\`. The site starts empty.
+          Upgrading: unpack the new version over the old folder, keeping \`data/\` and \`.env\`.
+          NOTES
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.v.outputs.tag }}
+          body_path: dist/NOTES.md
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.v.outputs.tag, '-') }}
+          files: |
+            dist/${{ steps.v.outputs.name }}.tar.gz
+            dist/${{ steps.v.outputs.name }}.zip
+            dist/SHA256SUMS.txt

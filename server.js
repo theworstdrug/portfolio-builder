@@ -37,10 +37,6 @@ function typeForExt(ext) {
 
 /* ---------- storage ---------- */
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-if (!fs.existsSync(CONTENT_FILE)) {
-  fs.copyFileSync(path.join(__dirname, 'content.example.json'), CONTENT_FILE);
-  console.log(`Created ${CONTENT_FILE} from content.example.json`);
-}
 // Password: once changed from the admin it is stored (scrypt-hashed) in DATA_DIR/auth.json,
 // which then takes priority over the ADMIN_PASSWORD env var.
 let auth = null;
@@ -236,7 +232,13 @@ function touch() {
   }
 }
 
-db = normalizeDb(JSON.parse(fs.readFileSync(CONTENT_FILE, 'utf8')));
+if (fs.existsSync(CONTENT_FILE)) {
+  db = normalizeDb(JSON.parse(fs.readFileSync(CONTENT_FILE, 'utf8')));
+} else {
+  db = normalizeDb({}); // blank slate: everything is added from /admin
+  fs.writeFileSync(CONTENT_FILE, JSON.stringify(db, null, 2));
+  console.log(`Created empty ${CONTENT_FILE}`);
+}
 
 /* ---------- public view of the content ---------- */
 function aquariumMedia(a) {
@@ -425,6 +427,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Server error' });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Portfolio running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}  (admin: /admin)`);
+require('./tls').start(app, {
+  env: process.env,
+  dataDir: DATA_DIR,
+  plain: () => app.listen(PORT, HOST, () => {
+    console.log(`Portfolio running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}  (admin: /admin)`);
+  }),
+}).catch((err) => {
+  console.error(`[tls] ${err.message}`);
+  process.exit(1);
 });

@@ -17,60 +17,99 @@ A small, self-hosted portfolio site:
 
 No database and no build step. Content is one JSON file (`data/content.json`) plus a folder of uploads (`data/uploads/`). **Back up the `data/` folder and you've backed up the whole site.**
 
-## Run it
+## Install on a server
 
-Requires Node 18+.
+Grab the latest bundle from **Releases**. It's ready to run, with dependencies included and **no content**, so the site starts blank and everything is added from `/admin`.
 
 ```bash
-npm install
-ADMIN_PASSWORD=something-long npm start
-# → http://localhost:3000   admin: http://localhost:3000/admin
+tar xzf portfolio-vX.Y.Z.tar.gz && cd portfolio-vX.Y.Z
+cp .env.example .env          # fill in: TLS_MODE, DOMAIN, LETSENCRYPT_EMAIL, ADMIN_PASSWORD
+docker compose up -d --build  # then: docker compose logs -f
 ```
 
-On first start, `data/content.json` is created from `content.example.json`.
+To run without Docker, use `node server.js` (Node 18+) or the systemd unit in `deploy/portfolio.service`.
 
-### With Docker + your own domain (recommended)
+**Upgrading:** unpack the new release over the old folder. Keep `data/` (content, uploads, password and certificates) and `.env`.
 
-The compose file runs the site behind [Caddy](https://caddyserver.com), which gets and renews HTTPS certificates for your domain automatically.
+### HTTPS / your own domain (Let's Encrypt, built in)
 
-1. **Point the domain at the server.** At the domain registrar (where nanarium was bought), open the DNS settings and add:
+The app gets and renews its own Let's Encrypt certificate, so you don't need nginx or Caddy.
+
+1. **DNS.** At the registrar, add A records (and AAAA records for IPv6) pointing at the server:
 
    | Type | Name | Value |
    |---|---|---|
-   | A | `@` | your server's public IP |
-   | A | `www` | your server's public IP |
+   | A | `@` | server's public IP |
+   | A | `www` | server's public IP |
 
-   (Also add AAAA records if the server has IPv6.) DNS changes can take a few minutes to an hour to take effect.
+2. **Ports.** 80 and 443 must be open to the internet (firewall/router). Let's Encrypt checks ownership over port 80.
 
-2. **Configure and start:**
-   ```bash
-   cp .env.example .env      # set DOMAIN=nanarium.com, www.nanarium.com and ADMIN_PASSWORD
-   docker compose up -d --build
+3. **`.env`:**
+   ```ini
+   TLS_MODE=letsencrypt
+   DOMAIN=nanarium.com,www.nanarium.com
+   LETSENCRYPT_EMAIL=you@example.com
+   LETSENCRYPT_STAGING=true     # first run only, see below
    ```
 
-3. Open `https://nanarium.com/admin`.
+4. Start it and watch the log. You should see `certificate saved` and `HTTPS on :443`. Once a staging certificate works, set `LETSENCRYPT_STAGING=false` and restart to get the real one. The staging run protects you from Let's Encrypt's rate limits while you're getting DNS right.
 
-Ports 80 and 443 must be reachable from the internet. Content lives in `./data` next to the compose file.
+How it behaves:
 
-**No domain yet?** Leave `DOMAIN=:80` and the site is served over plain HTTP at the server's IP.
+- Certificates are stored in `data/certs/`.
+- They're checked twice a day and renewed 30 days before expiry, with no restart needed.
+- Plain HTTP redirects to HTTPS.
+- Until the first certificate arrives, the site stays reachable over HTTP. If a request fails, the log says why and it retries (15 min, 30 min, 1 h … up to 12 h).
+- Adding a name to `DOMAIN` triggers a new certificate on the next start.
 
-**Home server?** Forward ports 80 and 443 on the router to the machine. If the ISP blocks those ports or the IP keeps changing, use [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) instead: point the tunnel at `http://localhost:3000`, uncomment `ports` for the `portfolio` service, and skip Caddy.
+Other modes:
 
-### Without Docker
+- `TLS_MODE=manual` + `TLS_CERT` / `TLS_KEY`: use your own certificate files. The app reloads them when they change, e.g. after certbot renews.
+- `TLS_MODE=off`: plain HTTP. Use it for local testing, Cloudflare Tunnel, or a proxy in front. A Caddy setup is in `deploy/docker-compose.caddy.yml`; set `TRUST_PROXY=true` behind any proxy.
 
-See `deploy/portfolio.service` (systemd) and `deploy/Caddyfile`. Run Caddy with `DOMAIN=nanarium.com caddy run --config deploy/Caddyfile`. Then set `TRUST_PROXY=true` on the app, so logins use secure cookies over HTTPS.
+**Home server?** Forward 80 and 443 on the router to the machine. If the ISP blocks those ports, use a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) with `TLS_MODE=off` instead.
+
+### Local development
+
+```bash
+npm install
+ADMIN_PASSWORD=dev npm run dev     # http://localhost:3000, admin at /admin
+```
+
+## Making a release
+
+`.github/workflows/release.yml` does the following:
+
+1. Builds the bundle (`.tar.gz`, `.zip` and `SHA256SUMS.txt`).
+2. Smoke-tests a blank boot.
+3. Publishes a GitHub Release.
+
+To trigger it, either:
+
+- push a tag: `git tag v1.0.0 && git push origin v1.0.0`, or
+- go to **Actions → Release → Run workflow** and enter a version.
+
+Versions with a dash (e.g. `v1.1.0-beta.1`) are marked as pre-releases.
 
 ## Settings (environment variables)
+
+Put these in `.env` (Docker or systemd both read it).
 
 | Variable | Default | |
 |---|---|---|
 | `ADMIN_PASSWORD` | random, printed at start | First admin password. Once it's changed in Admin → Site, the new one (stored hashed in `data/auth.json`) wins. Forgot it? Delete `data/auth.json` and restart. |
-| `PORT` / `HOST` | `3000` / `0.0.0.0` | |
-| `DATA_DIR` | `./data` | Where content.json and uploads live |
-| `MAX_UPLOAD_MB` | `1024` | Per-file limit. Raise your proxy's limit too |
+| `TLS_MODE` | `off` | `letsencrypt`, `manual` or `off` |
+| `DOMAIN` | | Comma-separated names for the certificate |
+| `LETSENCRYPT_EMAIL` | | Contact for Let's Encrypt |
+| `LETSENCRYPT_STAGING` | `false` | Test against the staging CA |
+| `TLS_CERT` / `TLS_KEY` | | PEM files for `TLS_MODE=manual` |
+| `HTTP_PORT` / `HTTPS_PORT` | `80` / `443` | Ports when TLS is on |
+| `PORT` / `HOST` | `3000` / `0.0.0.0` | Port when TLS is off |
+| `DATA_DIR` | `./data` | Content, uploads, password, certificates |
+| `MAX_UPLOAD_MB` | `1024` | Per-file upload limit |
 | `SESSION_HOURS` | `168` | How long an admin login lasts |
-| `TRUST_PROXY` | `false` | `true` behind Caddy/nginx (real visitor IPs, secure cookies on HTTPS) |
-| `SECURE_COOKIE` | `false` | Force secure cookies even without `TRUST_PROXY` |
+| `TRUST_PROXY` | `false` | `true` behind Caddy/nginx/Cloudflare |
+| `SECURE_COOKIE` | `false` | Force secure cookies (automatic with TLS or `TRUST_PROXY`) |
 
 ## Editing content
 
@@ -138,12 +177,13 @@ The carousel feel is set in `public/js/site.js`:
 
 ```
 server.js              API + static files + uploads (Express, Multer)
-content.example.json   starter content
+tls.js                 HTTPS: Let's Encrypt (acme-client) / manual certs / off
 public/index.html      site shell
 public/css/site.css    site styles
 public/js/site.js      carousel, windows, routing, media players, lightbox
 public/js/aquarium.js  aquarium backdrop (bubbles, seaweed, fish)
 public/admin/          admin UI
-deploy/                Caddyfile (used by docker compose) + systemd unit
-.env.example           domain + password for docker compose
+deploy/                systemd unit, optional Caddy compose file + Caddyfile
+.env.example           all server settings (HTTPS, domain, password)
+.github/workflows/     release workflow
 ```

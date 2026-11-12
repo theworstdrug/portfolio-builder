@@ -1,22 +1,25 @@
-# systemd unit for running without Docker.
-# 1. copy the repo to /opt/portfolio and run `npm ci --omit=dev`
-# 2. sudo cp deploy/portfolio.service /etc/systemd/system/
-# 3. edit ADMIN_PASSWORD below, then: sudo systemctl enable --now portfolio
+# systemd unit for running without Docker (e.g. from the release bundle).
+#   1. unpack the release to /opt/portfolio   (node_modules is included; needs Node 18+)
+#   2. cp .env.example .env  and fill it in (TLS_MODE, DOMAIN, LETSENCRYPT_EMAIL, ADMIN_PASSWORD)
+#   3. sudo mkdir -p /opt/portfolio/data && sudo chown -R www-data /opt/portfolio/data
+#   4. sudo cp deploy/portfolio.service /etc/systemd/system/ && sudo systemctl enable --now portfolio
+#   5. journalctl -u portfolio -f    to watch the certificate being issued
 [Unit]
 Description=Portfolio site
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 WorkingDirectory=/opt/portfolio
-ExecStart=/usr/bin/node server.js
-Environment=PORT=3000
-Environment=HOST=127.0.0.1
+EnvironmentFile=/opt/portfolio/.env
 Environment=DATA_DIR=/opt/portfolio/data
-Environment=ADMIN_PASSWORD=change-me
-
-Environment=TRUST_PROXY=true
+Environment=PORT=80
+ExecStart=/usr/bin/node server.js
 Restart=always
 User=www-data
+# lets a non-root user bind ports 80/443
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

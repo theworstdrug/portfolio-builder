@@ -1,37 +1,19 @@
-# Site + Caddy (automatic HTTPS for your own domain).
-# 1. cp .env.example .env   and fill it in
-# 2. point your domain's DNS (A record) at this server
-# 3. docker compose up -d --build
+# One container; HTTPS (Let's Encrypt) is handled by the app itself.
+#   1. cp .env.example .env  and fill it in
+#   2. point your domain's DNS at this server, open ports 80 + 443
+#   3. docker compose up -d --build      then watch: docker compose logs -f
+# Prefer Caddy in front instead? Use deploy/docker-compose.caddy.yml.
 services:
   portfolio:
     build: .
     restart: unless-stopped
+    env_file: .env
     environment:
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1024}
-      TRUST_PROXY: "true"   # behind Caddy: real visitor IPs + secure cookies over HTTPS
-    volumes:
-      - ./data:/data
-    # Not published directly; Caddy forwards to it. Uncomment to also reach it on :3000.
-    # ports: ["3000:3000"]
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on: [portfolio]
+      PORT: "80"          # used when TLS_MODE=off
+      HTTP_PORT: "80"
+      HTTPS_PORT: "443"
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"
-    environment:
-      DOMAIN: ${DOMAIN:-:80}
-      UPSTREAM: portfolio:3000
-      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1024}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
-volumes:
-  caddy_data:
-  caddy_config:
+      - ./data:/data      # content, uploads, password and certificates
