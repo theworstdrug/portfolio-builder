@@ -5,7 +5,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; font: 13px/1.4 var(--font); color: var(--fg); background: var(--bg); }
 button, input, select, textarea { font: inherit; color: inherit; }
-input[type=text], input[type=password], input[type=url], input[type=number], input:not([type]), select, textarea {
+input[type=text], input[type=password], input[type=url], input[type=number], input[type=email], input:not([type]), select, textarea {
   width: 100%; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 3px; background: #fff;
 }
 textarea { min-height: 120px; resize: vertical; line-height: 1.45; }

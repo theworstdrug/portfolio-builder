@@ -48,7 +48,7 @@ if (!auth && !ENV_PASSWORD) {
 }
 function checkPassword(pw) {
   pw = String(pw || '');
-  if (auth) {
+  if (auth && auth.hash) {
     const h = crypto.scryptSync(pw, Buffer.from(auth.salt, 'hex'), 64);
     return crypto.timingSafeEqual(h, Buffer.from(auth.hash, 'hex'));
   }
@@ -58,9 +58,23 @@ function checkPassword(pw) {
 }
 async function setPassword(pw) {
   const salt = crypto.randomBytes(16);
-  auth = { salt: salt.toString('hex'), hash: crypto.scryptSync(pw, salt, 64).toString('hex'), changed: new Date().toISOString() };
+  auth = { ...auth, salt: salt.toString('hex'), hash: crypto.scryptSync(pw, salt, 64).toString('hex'), changed: new Date().toISOString() };
+  await saveAuth();
+}
+async function saveAuth() {
   await fsp.writeFile(AUTH_FILE, JSON.stringify(auth), { mode: 0o600 });
 }
+
+/* ---------- email ---------- */
+const mailer = require('./mail').create(process.env);
+const FIRST_DOMAIN = String(process.env.DOMAIN || '').split(/[\s,]+/).filter((d) => d && !d.startsWith(':'))[0];
+// Used in emailed links. Never taken from the request, so a forged Host header can't redirect reset links.
+const SITE_URL = (process.env.SITE_URL || (FIRST_DOMAIN ? `https://${FIRST_DOMAIN}` : '')).replace(/\/+$/, '');
+const recoveryEmail = () => (auth && auth.email) || process.env.ADMIN_EMAIL || '';
+const canReset = () => mailer.enabled && !!recoveryEmail() && !!SITE_URL;
+let resetToken = null; // { hash, expires }
+let lastResetMail = 0;
+const sha = (s) => crypto.createHash('sha256').update(String(s)).digest();
 
 let db; // loaded below, after the validators are defined
 
@@ -326,6 +340,42 @@ app.post('/api/login', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/auth-info', (req, res) => res.json({ canReset: canReset() }));
+
+app.post('/api/forgot', async (req, res) => {
+  if (!canReset()) return res.status(400).json({ error: 'Password reset by email is not set up on this site.' });
+  if (Date.now() - lastResetMail < 2 * 60 * 1000) return res.json({ ok: true }); // quietly limit to one mail per 2 min
+  lastResetMail = Date.now();
+  const token = crypto.randomBytes(32).toString('hex');
+  resetToken = { hash: sha(token), expires: Date.now() + 3600 * 1000 };
+  try {
+    await mailer.send({
+      to: recoveryEmail(),
+      subject: 'Reset your portfolio password',
+      text: `Someone (hopefully you) asked to reset the admin password.\n\nChoose a new one here (link works for 1 hour, once):\n${SITE_URL}/admin#reset=${token}\n\nIf this wasn't you, ignore this email — nothing changes.`,
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[mail] reset email failed:', e.message);
+    res.status(502).json({ error: 'Could not send the email. Check the mail settings on the server.' });
+  }
+});
+
+app.post('/api/reset', async (req, res) => {
+  const { token, password } = req.body || {};
+  const valid = resetToken && resetToken.expires > Date.now() && typeof token === 'string'
+    && crypto.timingSafeEqual(sha(token), resetToken.hash);
+  if (!valid) return res.status(400).json({ error: 'This reset link has expired or was already used. Request a new one.' });
+  if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password needs at least 8 characters' });
+  resetToken = null;
+  await setPassword(password);
+  sessions.clear();
+  const t = crypto.randomBytes(32).toString('hex');
+  sessions.set(t, Date.now() + SESSION_HOURS * 3600 * 1000);
+  setCookie(req, res, t, SESSION_HOURS * 3600);
+  res.json({ ok: true });
+});
+
 app.post('/api/logout', (req, res) => {
   sessions.delete(cookies(req).pb_session);
   setCookie(req, res, '', 0);
@@ -413,6 +463,33 @@ app.post('/api/admin/password', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/admin/account', requireAuth, (req, res) => {
+  res.json({
+    email: (auth && auth.email) || '',
+    envEmail: process.env.ADMIN_EMAIL || '',
+    mail: { enabled: mailer.enabled, server: mailer.info, from: mailer.from },
+    siteUrl: SITE_URL,
+    canReset: canReset(),
+  });
+});
+
+app.put('/api/admin/account', requireAuth, async (req, res) => {
+  const email = str(req.body && req.body.email, 200).trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That doesn’t look like an email address' });
+  auth = { ...(auth || {}), email };
+  await saveAuth();
+  res.json({ ok: true, canReset: canReset() });
+});
+
+app.post('/api/admin/test-email', requireAuth, async (req, res) => {
+  try {
+    await mailer.send({ to: recoveryEmail(), subject: 'Test email from your portfolio', text: `It works! Password reset emails will arrive at this address.\n\n${SITE_URL || ''}` });
+    res.json({ ok: true, to: recoveryEmail() });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 app.get('/api/admin/backup', requireAuth, (req, res) => {
   const d = new Date().toISOString().slice(0, 10);
   res.setHeader('Content-Disposition', `attachment; filename="portfolio-content-${d}.json"`);
@@ -430,6 +507,10 @@ app.use((err, req, res, next) => {
 require('./tls').start(app, {
   env: process.env,
   dataDir: DATA_DIR,
+  notify: (subject, text) => {
+    if (!mailer.enabled || !recoveryEmail()) return;
+    mailer.send({ to: recoveryEmail(), subject, text }).catch((e) => console.error('[mail] alert failed:', e.message));
+  },
   plain: () => app.listen(PORT, HOST, () => {
     console.log(`Portfolio running at http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}  (admin: /admin)`);
   }),

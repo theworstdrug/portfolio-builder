@@ -47,7 +47,7 @@ jobs:
       - name: Sanity check
         run: |
           npm ci
-          for f in server.js tls.js public/js/*.js public/admin/admin.js; do node --check "$f"; done
+          for f in server.js tls.js mail.js public/js/*.js public/admin/admin.js; do node --check "$f"; done
           # boots with no data and serves an empty site
           DATA_DIR="$RUNNER_TEMP/smoke" ADMIN_PASSWORD=smoke PORT=3999 node server.js & PID=$!
           for i in $(seq 1 20); do curl -fs localhost:3999/api/content > "$RUNNER_TEMP/c.json" && break; sleep 0.5; done
@@ -61,7 +61,7 @@ jobs:
         run: |
           OUT="dist/$NAME"
           mkdir -p "$OUT"
-          cp -r server.js tls.js package.json package-lock.json public deploy \
+          cp -r server.js tls.js mail.js docs package.json package-lock.json public deploy \
                 Dockerfile .dockerignore docker-compose.yml .env.example README.md "$OUT"/
           # stamp the version, install production deps only
           (cd "$OUT" && npm pkg set version="$VERSION" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)

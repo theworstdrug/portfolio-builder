@@ -45,11 +45,11 @@ function config(env, dataDir) {
  * Start the servers for `app` according to the env. Returns once listening.
  * `plain` is called when TLS is off: (app) => listen however the caller likes.
  */
-async function start(app, { env, dataDir, plain }) {
+async function start(app, { env, dataDir, plain, notify = () => {} }) {
   const c = config(env, dataDir);
   if (c.mode === 'off') return plain();
   if (c.mode === 'manual') return startManual(app, c);
-  if (c.mode === 'letsencrypt') return startLetsEncrypt(app, c);
+  if (c.mode === 'letsencrypt') return startLetsEncrypt(app, c, notify);
   throw new Error(`Unknown TLS_MODE "${c.mode}" (use off, letsencrypt or manual)`);
 }
 
@@ -95,7 +95,7 @@ async function startManual(app, c) {
 }
 
 /* ---------------- Let's Encrypt ---------------- */
-async function startLetsEncrypt(app, c) {
+async function startLetsEncrypt(app, c, notify) {
   if (!c.domains.length) throw new Error('TLS_MODE=letsencrypt needs DOMAIN (e.g. DOMAIN=example.com,www.example.com)');
   if (!c.email) throw new Error('TLS_MODE=letsencrypt needs LETSENCRYPT_EMAIL');
   const acme = require('acme-client');
@@ -171,7 +171,7 @@ async function startLetsEncrypt(app, c) {
   };
 
   // check now, then twice a day; retry sooner after a failure
-  let failures = 0;
+  let failures = 0, lastAlert = 0;
   const check = async () => {
     let next = DAY / 2;
     try {
@@ -187,6 +187,15 @@ async function startLetsEncrypt(app, c) {
       log(`  check that DNS for ${c.domains.join(', ')} points here and port ${c.httpPort} is open. Retrying in ${Math.round(next / 60000)} min.`);
       const cur = await readExisting();
       if (cur && cur.notAfter > Date.now()) await apply(cur).catch(() => {}); // keep serving the old one
+      // email the owner if this is becoming a real problem (at most once a day)
+      const urgent = cur ? cur.notAfter - Date.now() < 14 * DAY : failures >= 3;
+      if (urgent && Date.now() - lastAlert > DAY) {
+        lastAlert = Date.now();
+        notify(`HTTPS certificate problem on ${c.domains[0]}`,
+          `The site could not get or renew its HTTPS certificate.\n\nError: ${e.message}\n\n`
+          + (cur ? `The current certificate expires ${cur.notAfter.toISOString().slice(0, 10)}.` : 'There is no certificate yet, so the site is only on plain HTTP.')
+          + `\n\nUsually this means the domain's DNS no longer points at the server, or port ${c.httpPort} is blocked. It will keep retrying.`);
+      }
     }
     setTimeout(check, next).unref();
   };

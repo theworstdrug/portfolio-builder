@@ -118,6 +118,8 @@
 
   /* ---------------- boot / auth ---------------- */
   async function boot() {
+    const reset = location.hash.match(/^#reset=([a-f0-9]+)$/);
+    if (reset) return renderReset(reset[1]);
     try {
       const data = await api('GET', '/api/admin/content');
       Object.assign(S, { site: data.site, sections: data.sections, media: data.media, limits: data.limits });
@@ -131,13 +133,42 @@
   function renderLogin() {
     const pw = h('input', { type: 'password', placeholder: 'Password', autocomplete: 'current-password' });
     const err = h('div', { class: 'err' });
-    const form = h('form', { class: 'login' }, h('h1', {}, 'Admin'), pw, h('button', { class: 'btn primary', type: 'submit' }, 'Log in'), err);
+    const forgot = h('button', { class: 'icon', type: 'button', hidden: true, style: 'justify-self:start;padding:0' }, 'Forgot password?');
+    const form = h('form', { class: 'login' }, h('h1', {}, 'Admin'), pw, h('button', { class: 'btn primary', type: 'submit' }, 'Log in'), forgot, err);
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       try { await api('POST', '/api/login', { password: pw.value }); boot(); } catch (e) { err.textContent = e.message; }
     });
+    forgot.addEventListener('click', async () => {
+      forgot.disabled = true;
+      try {
+        await api('POST', '/api/forgot');
+        err.style.color = 'inherit';
+        err.textContent = 'Check your email for a reset link (it works for 1 hour).';
+      } catch (e) { err.textContent = e.message; forgot.disabled = false; }
+    });
+    api('GET', '/api/auth-info').then((r) => { forgot.hidden = !r.canReset; }).catch(() => {});
     app.replaceChildren(form);
     pw.focus();
+  }
+
+  function renderReset(token) {
+    const a = h('input', { type: 'password', placeholder: 'New password (8+ characters)', autocomplete: 'new-password' });
+    const b = h('input', { type: 'password', placeholder: 'New password again', autocomplete: 'new-password' });
+    const err = h('div', { class: 'err' });
+    const form = h('form', { class: 'login' }, h('h1', {}, 'New password'), a, b, h('button', { class: 'btn primary', type: 'submit' }, 'Save and log in'), err);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if (a.value !== b.value) { err.textContent = 'Passwords don’t match.'; return; }
+      try {
+        await api('POST', '/api/reset', { token, password: a.value });
+        history.replaceState(null, '', location.pathname);
+        boot();
+        toast('Password changed');
+      } catch (e) { err.textContent = e.message; }
+    });
+    app.replaceChildren(form);
+    a.focus();
   }
 
   // Copy server-generated values (slugs) into the objects being edited, without re-rendering.
@@ -666,10 +697,40 @@
             msg.textContent = 'Password changed.';
           } catch (e) { msg.textContent = e.message; }
         } }, 'Change password'), msg),
+      recoveryEditor(),
       h('p', { class: 'hint', style: 'margin-top:18px' },
         h('a', { class: 'btn', href: '/api/admin/backup' }, 'Download text backup'),
         '  Saves all your words and settings as a file. (Photos and videos live in the server’s data folder.)'),
     );
+  }
+
+  // Recovery email: where "Forgot password?" links (and server alerts) are sent.
+  function recoveryEditor() {
+    const box = h('div', { style: 'margin-top:18px' }, h('p', { class: 'hint' }, 'Loading email settings…'));
+    api('GET', '/api/admin/account').then((acc) => {
+      const email = h('input', { type: 'email', value: acc.email, placeholder: acc.envEmail || 'you@example.com' });
+      const msg = h('span', { class: 'hint' });
+      const status = !acc.mail.enabled ? 'Email is turned off on the server, so “Forgot password?” is unavailable.'
+        : !acc.siteUrl ? 'The server has no DOMAIN or SITE_URL set, so reset links can’t be emailed yet.'
+        : `Sent from ${acc.mail.from} via ${acc.mail.server}.`;
+      box.replaceChildren(
+        h('label', {}, h('span', {}, 'Recovery email (for “Forgot password?” links and server alerts)'), email),
+        h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap' },
+          h('button', { class: 'btn', onclick: async () => {
+            try { await api('PUT', '/api/admin/account', { email: email.value }); msg.textContent = 'Saved.'; } catch (e) { msg.textContent = e.message; }
+          } }, 'Save email'),
+          h('button', { class: 'btn', disabled: !acc.mail.enabled, onclick: async () => {
+            msg.textContent = 'Sending…';
+            try {
+              await api('PUT', '/api/admin/account', { email: email.value });
+              const r = await api('POST', '/api/admin/test-email');
+              msg.textContent = `Sent to ${r.to}. Check the inbox (and spam folder).`;
+            } catch (e) { msg.textContent = 'Failed: ' + e.message; }
+          } }, 'Send test email'),
+          msg),
+        h('p', { class: 'hint' }, status));
+    }).catch(() => box.replaceChildren(h('p', { class: 'hint' }, 'Could not load email settings.')));
+    return box;
   }
 
   /* ---------------- help ---------------- */
@@ -688,6 +749,7 @@
       item('Turn the aquarium on or off', 'Site tab → Aquarium theme. “Optional” means visitors only see it if they switch it on; “On” means it’s there unless they switch it off.'),
       item('Check how it looks', 'Press “View site” (top right). It opens in a new tab; refresh that tab after making changes.'),
       item('Change my password', 'Site tab → Password & backup.'),
+      item('Forgot my password', 'On the login page press “Forgot password?” and a reset link is emailed to your recovery email. Set that address (and test it) in Site tab → Password & backup.'),
     );
   }
 

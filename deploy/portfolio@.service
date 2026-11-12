@@ -1,0 +1,25 @@
+# Template unit for hosting several sites on one server (one folder per site).
+#   /opt/<site>/        unpacked release + .env (TLS_MODE=off, PORT=<unique port>)
+#   sudo cp deploy/portfolio@.service /etc/systemd/system/
+#   sudo systemctl enable --now portfolio@<site>        e.g. portfolio@nanarium
+# Caddy (or nginx) in front handles HTTPS for every site; see docs/ionos.md.
+# The Environment= lines below are defaults; values in the site's .env take priority.
+[Unit]
+Description=Portfolio site %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/%i
+EnvironmentFile=/opt/%i/.env
+Environment=DATA_DIR=/opt/%i/data
+Environment=HOST=127.0.0.1
+Environment=TLS_MODE=off
+Environment=TRUST_PROXY=true
+ExecStart=/usr/bin/node server.js
+Restart=always
+User=www-data
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

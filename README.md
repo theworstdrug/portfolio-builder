@@ -13,11 +13,14 @@ A small, self-hosted portfolio site:
   - A plain-language **Help** tab.
   - Change your password, and download a backup of the text.
   - If the login expires, a pop-up asks for the password without losing any edits.
+  - **Forgot password?** emails a one-time reset link to her recovery address.
 - **Aquarium theme.** An optional animated backdrop: bubbles, swaying seaweed and five kinds of fish. See below.
 
 No database and no build step. Content is one JSON file (`data/content.json`) plus a folder of uploads (`data/uploads/`). **Back up the `data/` folder and you've backed up the whole site.**
 
 ## Install on a server
+
+**Step-by-step for an IONOS VPS** (SSH, SFTP, remote desktop, several sites on one server, email): see [`docs/ionos.md`](docs/ionos.md).
 
 Grab the latest bundle from **Releases**. It's ready to run, with dependencies included and **no content**, so the site starts blank and everything is added from `/admin`.
 
@@ -109,6 +112,12 @@ Put these in `.env` (Docker or systemd both read it).
 | `MAX_UPLOAD_MB` | `1024` | Per-file upload limit |
 | `SESSION_HOURS` | `168` | How long an admin login lasts |
 | `TRUST_PROXY` | `false` | `true` behind Caddy/nginx/Cloudflare |
+| `SMTP_HOST` | `localhost` | Mail server for reset links and alerts; `off` disables email |
+| `SMTP_PORT` / `SMTP_SECURE` | `25` / `false` | `587` for submission, `465` + `true` for implicit TLS |
+| `SMTP_USER` / `SMTP_PASS` | | Login, if the mail server needs one |
+| `MAIL_FROM` | `Portfolio <noreply@DOMAIN>` | Sender address |
+| `ADMIN_EMAIL` | | Fallback recovery address. The client sets her own in Admin → Site. |
+| `SITE_URL` | `https://<first DOMAIN>` | Base for links in emails |
 | `SECURE_COOKIE` | `false` | Force secure cookies (automatic with TLS or `TRUST_PROXY`) |
 
 ## Editing content
@@ -183,7 +192,9 @@ public/css/site.css    site styles
 public/js/site.js      carousel, windows, routing, media players, lightbox
 public/js/aquarium.js  aquarium backdrop (bubbles, seaweed, fish)
 public/admin/          admin UI
-deploy/                systemd unit, optional Caddy compose file + Caddyfile
+deploy/                systemd units (single site, multi-site template), optional Caddy files
+docs/ionos.md          server setup guide
+mail.js                outgoing email (nodemailer)
 .env.example           all server settings (HTTPS, domain, password)
 .github/workflows/     release workflow
 ```
