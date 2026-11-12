@@ -3,7 +3,7 @@
 #   Release from a tag:  git tag v1.0.0 && git push origin v1.0.0
 #   Or manually:         Actions → Release → Run workflow → enter a version (creates the tag)
 #
-# The bundle includes production node_modules, so a server only needs Node 18+
+# The bundle includes production node_modules, so a server only needs Node 20+
 # (or Docker). It ships with no content: the site starts as a blank slate.
 name: Release
 
@@ -86,7 +86,7 @@ jobs:
           curl -LO https://github.com/$REPO/releases/download/$TAG/$NAME.tar.gz
           tar xzf $NAME.tar.gz && cd $NAME
           cp .env.example .env    # set TLS_MODE, DOMAIN, LETSENCRYPT_EMAIL, ADMIN_PASSWORD
-          docker compose up -d --build        # or: node server.js   (Node 18+, deps included)
+          docker compose up -d --build        # or: node server.js   (Node 20+, deps included)
           \`\`\`
 
           Then open \`https://<your domain>/admin\`. The site starts empty.

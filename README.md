@@ -30,7 +30,7 @@ cp .env.example .env          # fill in: TLS_MODE, DOMAIN, LETSENCRYPT_EMAIL, AD
 docker compose up -d --build  # then: docker compose logs -f
 ```
 
-To run without Docker, use `node server.js` (Node 18+) or the systemd unit in `deploy/portfolio.service`.
+To run without Docker, use `node server.js` (Node 20+) or the systemd unit in `deploy/portfolio.service`.
 
 **Upgrading:** unpack the new release over the old folder. Keep `data/` (content, uploads, password and certificates) and `.env`.
 

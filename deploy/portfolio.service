@@ -1,5 +1,5 @@
 # systemd unit for running without Docker (e.g. from the release bundle).
-#   1. unpack the release to /opt/portfolio   (node_modules is included; needs Node 18+)
+#   1. unpack the release to /opt/portfolio   (node_modules is included; needs Node 20+)
 #   2. cp .env.example .env  and fill it in (TLS_MODE, DOMAIN, LETSENCRYPT_EMAIL, ADMIN_PASSWORD)
 #   3. sudo mkdir -p /opt/portfolio/data && sudo chown -R www-data /opt/portfolio/data
 #   4. sudo cp deploy/portfolio.service /etc/systemd/system/ && sudo systemctl enable --now portfolio

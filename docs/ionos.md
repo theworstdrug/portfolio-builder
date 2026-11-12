@@ -129,6 +129,8 @@ server$ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 server$ sudo apt install -y nodejs caddy postfix
 ```
 
+Check `node -v` prints **v20 or newer**. If it shows v18, Ubuntu's own package won and the NodeSource step didn't take. Run the setup script again and look for errors, then `sudo apt install -y nodejs` and check `apt policy nodejs`.
+
 Postfix asks two questions:
 
 - **General type of mail configuration:** `Internet Site`
