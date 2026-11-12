@@ -2,6 +2,8 @@
 
 This guide takes a fresh IONOS VPS to live HTTPS sites. It assumes:
 
+- the domains are registered at **Namecheap**, and only the server is at IONOS;
+
 - you manage it over **SSH**, move files with **SFTP**, and use a **remote desktop** from a Linux machine;
 - the server will host **several sites**. The examples use `nanarium.space` and `prismarose.space`, and the server itself is named `srv1.prismarose.space`.
 
@@ -14,7 +16,7 @@ Lines starting with `local$` run on your computer, and `server$` lines run on th
 1. [Choose the server](#1-choose-the-server)
 2. [First login and a non-root user](#2-first-login-and-a-non-root-user)
 3. [Firewalls](#3-firewalls)
-4. [DNS](#4-dns)
+4. [DNS (Namecheap)](#4-dns-domains-at-namecheap)
 5. [Install Node, Caddy and Postfix](#5-install-node-caddy-and-postfix)
 6. [Upload a site (SFTP)](#6-upload-a-site-sftp)
 7. [Configure and start the site](#7-configure-and-start-the-site)
@@ -80,35 +82,43 @@ server$ sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tc
 server$ sudo ufw enable
 ```
 
-## 4. DNS
+## 4. DNS (domains at Namecheap)
 
-Make these changes in **IONOS → Domains & SSL → *domain* → DNS**.
+The domains stay registered at Namecheap. You only point them at the IONOS server. In Namecheap, go to **Domain List → Manage** (next to the domain) → **Advanced DNS**.
+
+First check the **Domain** tab: under **Nameservers** it should say **Namecheap BasicDNS**. If it says Custom DNS, the records below must be made wherever those nameservers live instead.
 
 **prismarose.space** (your domain, which also names the server):
 
-| Type | Host | Value |
-|---|---|---|
-| A | `srv1` | SERVER_IP |
-| A | `@` | SERVER_IP |
-| A | `www` | SERVER_IP |
+| Type | Host | Value | TTL |
+|---|---|---|---|
+| A Record | `srv1` | SERVER_IP | Automatic |
+| A Record | `@` | SERVER_IP | Automatic |
+| A Record | `www` | SERVER_IP | Automatic |
 
 **nanarium.space** (the client's domain):
 
-| Type | Host | Value |
-|---|---|---|
-| A | `@` | SERVER_IP |
-| A | `www` | SERVER_IP (if `www` is a CNAME, replace it with this A record) |
+| Type | Host | Value | TTL |
+|---|---|---|---|
+| A Record | `@` | SERVER_IP | Automatic |
+| A Record | `www` | SERVER_IP | Automatic |
 
-These rules apply to both domains:
+New Namecheap domains come with two placeholder records. **Delete both** on each domain, or they'll fight with the A records above:
 
-- **Delete AAAA records** on `@` and `www`. IONOS creates them by default, pointing at its parking page. Let's Encrypt prefers IPv6 and fails if they're left in. (If you later enable IPv6 on the server, add AAAA records with the server's own IPv6 address.)
-- **Don't touch MX records** or anything else mail-related. Those decide where the domain's *incoming* mail and webmail go, and this server doesn't change that (see step 9).
+- **CNAME Record** `www` → `parkingpage.namecheap.com.`
+- **URL Redirect Record** `@` → `http://www.<domain>`
 
-**Reverse DNS:** in the Cloud Panel, under the server's IP address, set reverse DNS (PTR) to `srv1.prismarose.space`. Mail providers check this.
+Also:
 
-Check from your computer. The first command should print your IP and the second nothing:
+- **Delete any AAAA records** on `@` and `www`, unless they hold the server's own IPv6 address. Let's Encrypt prefers IPv6 and fails if one points elsewhere.
+- **Leave the "Mail Settings" section alone** (at the bottom of Advanced DNS: Email Forwarding, Private Email, Custom MX…). That decides where the domain's *incoming* mail goes, and this server doesn't change it (see step 9).
+
+**Reverse DNS stays at IONOS.** It belongs to whoever owns the IP, not the domain. In the IONOS Cloud Panel, under the server's IP address, set reverse DNS (PTR) to `srv1.prismarose.space`. Do this *after* the `srv1` A record above exists. Mail providers check that the two match.
+
+Namecheap changes usually show up within minutes, though they can take up to an hour. Check from your computer. The first command should print your IP and the second nothing:
 ```bash
 local$ dig +short nanarium.space A ; dig +short nanarium.space AAAA
+local$ dig +short srv1.prismarose.space A
 local$ dig +short -x SERVER_IP          # → srv1.prismarose.space.
 ```
 
@@ -226,15 +236,18 @@ What each setting does:
 - `inet_protocols = ipv4`: only IPv4 has reverse DNS set up, and Gmail rejects IPv6 senders without it.
 - `mydestination = localhost`: **never list the sites' domains here.** If you did, a reset email to her@nanarium.space would be "delivered" on this server instead of reaching her real mailbox.
 
-**Webmail is unaffected.** Incoming mail for nanarium.space follows its MX records (e.g. to IONOS mail), so she keeps reading it in webmail as before. This server only sends.
+**Webmail is unaffected.** Incoming mail for nanarium.space follows its MX records (Namecheap's "Mail Settings"), so she keeps reading it wherever she does now. This server only sends.
 
-**SPF: allow this server to send for each domain.** A domain can have only **one** SPF TXT record, so edit the existing one rather than adding a second. Keep IONOS's include (for webmail sending) and add the server:
+**SPF: allow this server to send for each domain.** In Namecheap, Advanced DNS → **TXT Record**, host `@`. A domain can have only **one** SPF record (`v=spf1 …`), so if there's already one, edit it rather than adding a second.
 
-```
-v=spf1 include:_spf-eu.ionos.com ip4:SERVER_IP ~all
-```
+| The domain's mail setting | SPF value |
+|---|---|
+| No email service | `v=spf1 ip4:SERVER_IP ~all` |
+| Namecheap Email Forwarding | `v=spf1 include:spf.efwd.registrar-servers.com ip4:SERVER_IP ~all` |
+| Namecheap Private Email | `v=spf1 include:spf.privateemail.com ip4:SERVER_IP ~all` |
+| Something else (Google, Zoho, …) | keep that provider's `include:` and add ` ip4:SERVER_IP` before `~all` |
 
-The include name IONOS puts there varies by region (e.g. `_spf-us.ionos.com`), so keep whatever is already in the record. If the domain has no SPF record at all, use `v=spf1 ip4:SERVER_IP ~all`.
+Namecheap often adds the include for you when you turn on a mail service. If there's already an SPF record, just insert `ip4:SERVER_IP` into it.
 
 **Test it:** press **Send test email** in the admin. If you want to watch it go out:
 ```bash
@@ -252,7 +265,7 @@ SMTP_PASS=the-mailbox-password
 MAIL_FROM=Nanarium <noreply@nanarium.space>
 ```
 
-Then `sudo systemctl restart portfolio@nanarium`. IONOS only lets a mailbox send as its own domain, so each site needs its own mailbox if you go this way.
+Then `sudo systemctl restart portfolio@nanarium`. IONOS only lets a mailbox send as its own domain, so each site needs its own mailbox if you go this way. (If the client's mail is Namecheap Private Email, its SMTP works the same way: `SMTP_HOST=mail.privateemail.com`, `SMTP_PORT=587`, with that mailbox's login.)
 
 ## 10. Remote desktop
 
@@ -324,6 +337,6 @@ local$ ssh deploy@SERVER_IP "sudo tar czf - -C /opt/nanarium data .env" > nanari
 | Symptom | Check |
 |---|---|
 | Site down | `systemctl status portfolio@nanarium`, `journalctl -u portfolio@nanarium -n 50` |
-| Certificate errors | `journalctl -u caddy -n 50`. Usually DNS (AAAA records!) or a closed port 80. |
+| Certificate errors | `journalctl -u caddy -n 50`. Usually DNS (Namecheap's leftover URL redirect or AAAA records!) or a closed port 80. |
 | Emails not arriving | `sudo journalctl -t postfix/smtp -n 50`, then check SPF, reverse DNS, and the spam folder. |
 | Uploads fail on big videos | Raise `MAX_UPLOAD_MB` in `.env` **and** `max_size` in the Caddyfile. |
