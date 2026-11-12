@@ -49,12 +49,18 @@
     setTimeout(() => t.remove(), 2200);
   }
 
+  // Every edit bumps a version number and schedules an autosave a moment later.
+  let version = 0, saveTimer = null;
+  function setStatus(text, cls = '') {
+    const st = document.getElementById('status');
+    if (st) { st.textContent = text; st.className = 'status ' + cls; }
+  }
   function markDirty() {
     S.dirty = true;
-    const st = document.getElementById('status');
-    if (st) { st.textContent = 'Unsaved changes'; st.className = 'status dirty'; }
-    const b = document.getElementById('save');
-    if (b) b.disabled = false;
+    version++;
+    setStatus('Editing…', 'dirty');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, 1200);
   }
 
   // Bind an input to obj[key]. Changes mark the structure dirty without re-rendering.
@@ -134,23 +140,58 @@
     pw.focus();
   }
 
+  // Copy server-generated values (slugs) into the objects being edited, without re-rendering.
+  function mergeSaved(res) {
+    const byId = (arr) => new Map((arr || []).map((x) => [x.id, x]));
+    const secs = byId(res.sections);
+    S.sections.forEach((sec) => {
+      const r = secs.get(sec.id); if (!r) return;
+      if (!sec.slug) sec.slug = r.slug;
+      const projs = byId(r.projects);
+      sec.projects.forEach((p) => { const rp = projs.get(p.id); if (rp && !p.slug) p.slug = rp.slug; });
+    });
+    if (res.site) S.site.updated = res.site.updated;
+  }
+
   async function save() {
-    if (S.saving) return;
+    clearTimeout(saveTimer);
+    if (!S.dirty) return;
+    if (S.saving) { saveTimer = setTimeout(save, 600); return; }
     S.saving = true;
+    const sent = version;
+    setStatus('Saving…', 'dirty');
     try {
       const res = await api('PUT', '/api/admin/structure', { site: S.site, sections: S.sections });
-      S.site = res.site; S.sections = res.sections;
-      S.dirty = false;
-      render();
-      toast('Saved');
+      mergeSaved(res);
+      if (version === sent) { S.dirty = false; setStatus('All changes saved'); }
+      else saveTimer = setTimeout(save, 600); // more edits came in while saving
     } catch (e) {
-      if (e.status === 401) { toast('Session expired — log in again (your edits are still on this page).'); }
-      else toast('Save failed: ' + e.message);
+      setStatus('Not saved', 'dirty');
+      if (e.status === 401) { S.saving = false; await relogin(); return save(); }
+      toast('Save failed: ' + e.message + ' — will retry.');
+      saveTimer = setTimeout(save, 5000);
     } finally { S.saving = false; }
   }
 
+  // Session expired: ask for the password in a dialog so nothing on the page is lost.
+  function relogin() {
+    return new Promise((resolve) => {
+      const pw = h('input', { type: 'password', placeholder: 'Password', autocomplete: 'current-password' });
+      const err = h('div', { class: 'err' });
+      const form = h('form', { style: 'display:grid;gap:10px' },
+        h('p', {}, 'You were logged out. Enter your password and your changes will be saved.'), pw,
+        h('button', { class: 'btn primary', type: 'submit' }, 'Log in'), err);
+      const close = modal('Log in again', form);
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try { await api('POST', '/api/login', { password: pw.value }); close(); resolve(); } catch (e2) { err.textContent = e2.message; }
+      });
+      pw.focus();
+    });
+  }
+
   document.addEventListener('keydown', (ev) => {
-    if ((ev.metaKey || ev.ctrlKey) && ev.key === 's') { ev.preventDefault(); if (S.dirty) save(); }
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === 's') { ev.preventDefault(); save(); }
   });
   addEventListener('beforeunload', (ev) => { if (S.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 
@@ -160,14 +201,14 @@
     const tab = (id, label) => h('button', { class: S.view === id ? 'on' : '', onclick: () => { S.view = id; render(); } }, label);
     const top = h('div', { class: 'top' },
       h('span', { class: 'brand' }, S.site.title || 'Portfolio'),
-      h('div', { class: 'tabs' }, tab('sections', 'Sections'), tab('media', `Media (${S.media.length})`), tab('site', 'Site')),
+      h('div', { class: 'tabs' }, tab('sections', 'Sections'), tab('media', `Media (${S.media.length})`), tab('site', 'Site'), tab('help', 'Help')),
       h('span', { class: 'spacer' }),
-      h('span', { id: 'status', class: 'status' + (S.dirty ? ' dirty' : '') }, S.dirty ? 'Unsaved changes' : 'All changes saved'),
-      h('button', { id: 'save', class: 'btn primary', disabled: !S.dirty, onclick: save }, 'Save'),
+      h('span', { id: 'status', class: 'status' + (S.dirty ? ' dirty' : '') }, S.dirty ? 'Editing…' : 'All changes saved'),
       h('a', { class: 'btn', href: '/', target: '_blank' }, 'View site'),
       h('button', { class: 'btn', onclick: async () => { await api('POST', '/api/logout'); renderLogin(); } }, 'Log out'),
     );
-    const body = S.view === 'media' ? viewMedia() : S.view === 'site' ? viewSite() : viewSections();
+    const views = { media: viewMedia, site: viewSite, help: viewHelp, sections: viewSections };
+    const body = (views[S.view] || viewSections)();
     app.replaceChildren(top, h('div', { class: 'wrap' }, body));
     scrollTo(0, scroll);
   }
@@ -438,25 +479,51 @@
   }
 
   function pickMedia(p) {
-    const f = { q: '', type: '', tag: '' };
+    openPicker({ title: `Add media to “${p.title}”`, exclude: p.media, multiple: true, onPick: (ids) => p.media.push(...ids) });
+  }
+
+  // Library picker. With multiple=false, clicking an item picks it straight away.
+  function openPicker({ title, exclude = [], type = '', multiple = false, onPick }) {
+    const f = { q: '', type, tag: '' };
     const chosen = new Set();
     const grid = h('div', { class: 'media-lib' });
+    let close;
+    const done = (ids) => { onPick(ids); markDirty(); close(); render(); };
     const draw = () => {
-      const list = filteredMedia(f).filter((m) => !p.media.includes(m.id));
+      const list = filteredMedia(f).filter((m) => !exclude.includes(m.id));
       grid.replaceChildren(...(list.length ? list.map((m) => {
         const el = h('div', { class: 'thumb pick' + (chosen.has(m.id) ? ' sel' : '') }, thumbPic(m), h('div', { class: 'cap' }, m.title || m.original));
-        el.addEventListener('click', () => { chosen.has(m.id) ? chosen.delete(m.id) : chosen.add(m.id); el.classList.toggle('sel'); });
+        el.addEventListener('click', () => {
+          if (!multiple) return done([m.id]);
+          chosen.has(m.id) ? chosen.delete(m.id) : chosen.add(m.id); el.classList.toggle('sel');
+        });
         return el;
-      }) : [h('p', { class: 'hint' }, 'Nothing to add — upload something in the Media tab or use “+ Upload”.')]));
+      }) : [h('p', { class: 'hint' }, 'Nothing here yet — use “Upload” instead, or add files in the Media tab.')]));
     };
     draw();
-    modal(`Add media to “${p.title}”`, h('div', {}, filterBar(f, draw), grid), (close) => h('div', { class: 'foot-actions' },
+    close = modal(title, h('div', {}, filterBar(f, draw), grid), multiple ? () => h('div', { class: 'foot-actions' },
       h('span'),
-      h('button', { class: 'btn primary', onclick: () => {
-        // keep library order
-        S.media.forEach((m) => { if (chosen.has(m.id)) p.media.push(m.id); });
-        markDirty(); close(); render();
-      } }, 'Add selected')));
+      h('button', { class: 'btn primary', onclick: () => done(S.media.filter((m) => chosen.has(m.id)).map((m) => m.id)) }, 'Add selected')) : null);
+  }
+
+  // One image slot (choose from library / upload / remove), used by the aquarium settings.
+  function imageSlot(label, obj, key, hint) {
+    const m = obj[key] ? mediaById(obj[key]) : null;
+    const fileInput = h('input', { type: 'file', hidden: true, accept: (S.limits.types?.image || []).join(',') });
+    fileInput.addEventListener('change', async () => {
+      const [added] = await uploadFiles([...fileInput.files], 'aquarium');
+      if (added) { obj[key] = added.id; markDirty(); render(); }
+    });
+    return h('div', { class: 'slot' },
+      h('label', {}, h('span', {}, label)),
+      h('div', { style: 'display:flex;gap:8px;align-items:flex-start' },
+        h('div', { class: 'thumb', style: 'width:64px' }, m ? thumbPic(m) : h('div', { class: 'pic' }, 'none')),
+        h('div', { style: 'display:grid;gap:4px' },
+          h('button', { class: 'btn small', onclick: () => openPicker({ title: label, type: 'image', onPick: ([id]) => { obj[key] = id; } }) }, 'Choose'),
+          h('button', { class: 'btn small', onclick: () => fileInput.click() }, 'Upload'),
+          m ? h('button', { class: 'btn small', onclick: () => { obj[key] = ''; markDirty(); render(); } }, 'Remove') : null,
+          fileInput)),
+      hint ? h('p', { class: 'hint' }, hint) : null);
   }
 
   /* ---------------- site ---------------- */
@@ -481,6 +548,146 @@
         field('Text colour', s.theme, 'text', { placeholder: '#222222' }),
         field('Font stack (CSS font-family)', s.theme, 'font', { full: true, placeholder: '"Helvetica Neue", Helvetica, Arial, sans-serif' }),
       ),
+      aquariumEditor(s.aquarium),
+      accountEditor(),
+    );
+  }
+
+  const num = (v) => Number(v) || 0;
+  function numField(label, obj, key, opts = {}) {
+    return field(label, obj, key, { type: 'number', transform: num, ...opts });
+  }
+  function colorField(label, obj, key) {
+    const c = h('input', { type: 'color', value: obj[key], style: 'width:40px;height:32px;padding:2px;flex:none' });
+    const t = h('input', { value: obj[key] });
+    c.addEventListener('input', () => { obj[key] = t.value = c.value; markDirty(); });
+    t.addEventListener('input', () => { obj[key] = t.value; if (/^#[0-9a-f]{6}$/i.test(t.value)) c.value = t.value; markDirty(); });
+    return h('label', {}, h('span', {}, label), h('div', { style: 'display:flex;gap:6px' }, c, t));
+  }
+
+  const BEHAVIORS = [
+    ['cruiser', 'Cruiser', 'Swims slowly back and forth, drifting up and down. Scatters from the cursor.'],
+    ['school', 'School', 'A group following an invisible leader. "How many" = fish in the school.'],
+    ['darter', 'Darter', 'Hovers in place, then darts somewhere new.'],
+    ['drifter', 'Drifter', 'Jellyfish-style: pulses upward, sinks slowly, wraps top to bottom.'],
+    ['bottom', 'Bottom walker', 'Walks along the floor and pauses (crab, snail, catfish…).'],
+  ];
+
+  function aquariumEditor(a) {
+    const fishList = h('div');
+    a.fish.forEach((f, i) => {
+      const beh = BEHAVIORS.find((b) => b[0] === f.behavior) || BEHAVIORS[0];
+      fishList.append(h('div', { class: 'card' },
+        h('div', { class: 'card-head', style: 'cursor:default' },
+          h('span', { class: 't' }, f.name || '(unnamed)', h('em', {}, `${f.count} × ${beh[1]}`)),
+          h('button', { class: 'icon', title: 'Up', onclick: () => { move(a.fish, i, -1); markDirty(); render(); } }, '↑'),
+          h('button', { class: 'icon', title: 'Remove', onclick: () => { if (confirm(`Remove "${f.name}"?`)) { a.fish.splice(i, 1); markDirty(); render(); } } }, '×')),
+        h('div', { class: 'card-body' },
+          h('div', { class: 'grid' },
+            field('Name (just for you)', f, 'name'),
+            select('Behaviour', f, 'behavior', BEHAVIORS.map(([v, t]) => [v, t]), render),
+            numField('How many', f, 'count'),
+            numField('Size (px wide)', f, 'size'),
+            numField('Speed (1 = normal)', f, 'speed'),
+            select('Layer', f, 'layer', [['back', 'Behind the menu text'], ['front', 'In front of the menu text']]),
+          ),
+          h('p', { class: 'hint', style: 'margin:0' }, beh[2]),
+          h('div', { class: 'grid' },
+            imageSlot('Image', f, 'image', 'Transparent PNG/WebP. Leave empty for a placeholder shape. For animation, put frames side by side in one strip.'),
+            h('div', { class: 'grid', style: 'grid-template-columns:1fr 1fr' },
+              select('Image faces', f, 'facing', [['right', 'Right →'], ['left', '← Left']]),
+              colorField('Placeholder colour', f, 'color'),
+              numField('Frames in strip', f, 'frames'),
+              numField('Frames per second', f, 'fps')),
+          ),
+        )));
+    });
+
+    const weeds = a.seaweed;
+    const weedStrip = h('div', { class: 'strip' },
+      weeds.images.map((wid, i) => h('div', { class: 'thumb', style: 'width:80px' }, thumbPic(mediaById(wid)),
+        h('div', { class: 'tools' }, h('span'), h('button', { class: 'icon', title: 'Remove', onclick: () => { weeds.images.splice(i, 1); markDirty(); render(); } }, '×')))),
+      h('button', { class: 'btn small', onclick: () => openPicker({ title: 'Seaweed images', type: 'image', multiple: true, exclude: weeds.images, onPick: (ids) => weeds.images.push(...ids) }) }, '+ Add images'));
+
+    return h('div', {},
+      h('h3', {}, 'Aquarium theme'),
+      h('p', { class: 'hint' }, 'An animated aquarium behind the menu. Visitors get a small “(Aquarium on/off)” switch in the footer that lasts for their visit.'),
+      h('div', { class: 'grid' },
+        select('Aquarium', a, 'mode', [['off', 'Off — hidden, no switch'], ['optional', 'Optional — off until a visitor turns it on'], ['on', 'On — visitors can turn it off']]),
+        select('Window style', a, 'panel', [['glass', 'Frosted glass'], ['solid', 'Solid']]),
+      ),
+      h('div', { class: 'grid', style: 'margin-top:12px' },
+        colorField('Water (top)', a, 'top'),
+        colorField('Water (bottom)', a, 'bottom'),
+        colorField('Text colour', a, 'text'),
+      ),
+      h('div', { class: 'grid', style: 'margin-top:12px' },
+        imageSlot('Backdrop image', a, 'background', 'Covers the whole screen, on top of the water colours.'),
+        h('div', {},
+          numField('Bubbles (0–100)', a.bubbles, 'amount'),
+          h('div', { style: 'height:10px' }),
+          imageSlot('Bubble image', a.bubbles, 'image', 'Optional. Default is drawn circles.')),
+      ),
+      h('h3', {}, 'Seaweed'),
+      h('div', { class: 'grid' },
+        numField('How many strands', weeds, 'count'),
+        numField('Tallest (% of screen)', weeds, 'height'),
+        numField('% in front of the text', weeds, 'front'),
+        colorField('Placeholder colour', weeds, 'color'),
+      ),
+      h('p', { class: 'hint' }, 'Images: tall, transparent, base at the bottom. Several images are used in turn. They bend as they sway.'),
+      weedStrip,
+      h('h3', {}, 'Fish'),
+      fishList,
+      h('button', { class: 'btn', onclick: () => {
+        a.fish.push({ id: uid(), name: 'New fish', image: '', behavior: 'cruiser', count: 2, size: 60, speed: 1, facing: 'right', frames: 1, fps: 8, layer: 'back', color: '#f39c3d' });
+        markDirty(); render();
+      } }, '+ Add fish type'),
+    );
+  }
+
+  function accountEditor() {
+    const cur = h('input', { type: 'password', autocomplete: 'current-password' });
+    const next = h('input', { type: 'password', autocomplete: 'new-password' });
+    const again = h('input', { type: 'password', autocomplete: 'new-password' });
+    const msg = h('span', { class: 'hint' });
+    return h('div', {},
+      h('h3', {}, 'Password & backup'),
+      h('div', { class: 'grid' },
+        h('label', {}, h('span', {}, 'Current password'), cur),
+        h('label', {}, h('span', {}, 'New password (8+ characters)'), next),
+        h('label', {}, h('span', {}, 'New password again'), again)),
+      h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:10px' },
+        h('button', { class: 'btn', onclick: async () => {
+          if (next.value !== again.value) { msg.textContent = 'New passwords don’t match.'; return; }
+          try {
+            await api('POST', '/api/admin/password', { current: cur.value, next: next.value });
+            cur.value = next.value = again.value = '';
+            msg.textContent = 'Password changed.';
+          } catch (e) { msg.textContent = e.message; }
+        } }, 'Change password'), msg),
+      h('p', { class: 'hint', style: 'margin-top:18px' },
+        h('a', { class: 'btn', href: '/api/admin/backup' }, 'Download text backup'),
+        '  Saves all your words and settings as a file. (Photos and videos live in the server’s data folder.)'),
+    );
+  }
+
+  /* ---------------- help ---------------- */
+  function viewHelp() {
+    const item = (q, ...a) => h('div', { style: 'margin-bottom:18px' }, h('div', { style: 'font-weight:600;margin-bottom:4px' }, q), h('div', {}, ...a));
+    return h('div', { style: 'max-width:680px;line-height:1.55' },
+      h('h2', {}, 'How to…'),
+      item('Save my changes', 'You don’t need to: everything saves by itself a second after you stop typing. The top right says “All changes saved” when it’s done.'),
+      item('Change what’s in the big menu', 'Sections tab. Each row on the left is one line of the menu, top to bottom. Use ↑ ↓ to reorder and “+ Add section” for a new one. The last line (© …) is the colophon, set in the Site tab.'),
+      item('Add a project', 'Sections tab → pick a section → “+ Add project”. New projects start as a Draft, so nobody sees them until you untick “Draft”.'),
+      item('Add photos, videos, sound or PDFs', 'Inside a project, press “+ Upload” (or “+ From library” for files already uploaded). You can also drag files onto the Media tab. Use ← → under a thumbnail to change the order.'),
+      item('Write captions, credits and tags', 'Click any thumbnail in the Media tab, or “edit” under it in a project, to give it a title, caption, credit, alt text and tags. Tags are clickable on the site and show everything with the same tag.'),
+      item('Make text bold, italic, or a link', '**bold**, *italic*, [the words](https://link.com). Web addresses and emails become links by themselves. Leave an empty line to start a new paragraph.'),
+      item('Hide something without deleting it', 'Projects: tick “Draft”. Sections: tick “Hide from menu”.'),
+      item('Change the email / Instagram links at the bottom', 'Site tab → Footer links.'),
+      item('Turn the aquarium on or off', 'Site tab → Aquarium theme. “Optional” means visitors only see it if they switch it on; “On” means it’s there unless they switch it off.'),
+      item('Check how it looks', 'Press “View site” (top right). It opens in a new tab; refresh that tab after making changes.'),
+      item('Change my password', 'Site tab → Password & backup.'),
     );
   }
 

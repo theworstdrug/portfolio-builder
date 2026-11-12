@@ -13,7 +13,7 @@ Environment=PORT=3000
 Environment=HOST=127.0.0.1
 Environment=DATA_DIR=/opt/portfolio/data
 Environment=ADMIN_PASSWORD=change-me
-Environment=SECURE_COOKIE=true
+
 Environment=TRUST_PROXY=true
 Restart=always
 User=www-data

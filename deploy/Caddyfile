@@ -1,8 +1,9 @@
-# Caddy gives you automatic HTTPS. Replace the domain, then: sudo caddy run --config deploy/Caddyfile
-example.com {
+# Used by docker-compose.yml, or standalone:  DOMAIN=nanarium.com caddy run --config deploy/Caddyfile
+# DOMAIN can list several names: "nanarium.com, www.nanarium.com". Use ":80" for plain HTTP (no domain yet).
+{$DOMAIN::80} {
 	encode zstd gzip
 	request_body {
-		max_size 1GB
+		max_size {$MAX_UPLOAD_MB:1024}MB
 	}
-	reverse_proxy 127.0.0.1:3000
+	reverse_proxy {$UPSTREAM:127.0.0.1:3000}
 }

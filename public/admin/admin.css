@@ -5,7 +5,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; font: 13px/1.4 var(--font); color: var(--fg); background: var(--bg); }
 button, input, select, textarea { font: inherit; color: inherit; }
-input[type=text], input[type=password], input[type=url], input:not([type]), select, textarea {
+input[type=text], input[type=password], input[type=url], input[type=number], input:not([type]), select, textarea {
   width: 100%; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 3px; background: #fff;
 }
 textarea { min-height: 120px; resize: vertical; line-height: 1.45; }
@@ -53,6 +53,8 @@ label > span { display: block; color: var(--muted); font-size: 11px; margin-bott
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .grid .full { grid-column: 1 / -1; }
+.grid > * { min-width: 0; }
+input { min-width: 0; }
 h2 { font-weight: 400; font-size: 22px; letter-spacing: -.01em; margin: 0 0 14px; }
 h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; margin: 28px 0 10px; }
 

@@ -63,14 +63,48 @@
     document.title = s.title || 'Portfolio';
     $('meta[name="description"]').setAttribute('content', s.description || '');
     const root = document.documentElement.style;
-    if (s.theme?.background) root.setProperty('--bg', s.theme.background);
-    if (s.theme?.text) root.setProperty('--fg', s.theme.text);
+    if (s.theme?.background) root.setProperty('--theme-bg', s.theme.background);
+    if (s.theme?.text) root.setProperty('--theme-fg', s.theme.text);
     if (s.theme?.font) root.setProperty('--font', s.theme.font);
-    const foot = $('#foot');
-    foot.replaceChildren(
-      h('span', {}, s.updated || ''),
+    const aq = s.aquarium;
+    const toggle = aq && aq.mode !== 'off'
+      ? h('button', { class: 'link', type: 'button', id: 'aq-toggle', onclick: () => setAquarium(!aquariumOn, true) })
+      : null;
+    $('#foot').replaceChildren(
+      h('span', { class: 'foot-left' }, s.updated || '', toggle),
       ...(s.footer || []).map((l) => h('a', { href: l.url, target: /^https?:/.test(l.url) ? '_blank' : null, rel: 'noopener' }, l.label)),
     );
+    if (aq && aq.mode !== 'off') {
+      root.setProperty('--aq-top', aq.top);
+      root.setProperty('--aq-bottom', aq.bottom);
+      root.setProperty('--aq-text', aq.text);
+      const bg = aq.background && data.media[aq.background];
+      if (bg) root.setProperty('--aq-image', `url("${bg.src}")`);
+      document.documentElement.classList.toggle('aq-solid', aq.panel === 'solid');
+      let pref = null;
+      try { pref = sessionStorage.getItem(AQ_KEY); } catch { /* storage blocked */ }
+      setAquarium(pref ? pref === 'on' : aq.mode === 'on', false);
+    }
+  }
+
+  /* ---------------- aquarium theme ---------------- */
+  // Site-wide mode is set in the admin (off / optional / on by default).
+  // Visitors can flip it for their own session with the footer toggle.
+  const AQ_KEY = 'aquarium';
+  let aquariumOn = false, aqStopTimer = null;
+  function setAquarium(on, remember) {
+    aquariumOn = on;
+    if (remember) { try { sessionStorage.setItem(AQ_KEY, on ? 'on' : 'off'); } catch { /* ignore */ } }
+    const btn = $('#aq-toggle');
+    if (btn) { btn.textContent = on ? '(Aquarium on)' : '(Aquarium off)'; btn.setAttribute('aria-pressed', on); }
+    clearTimeout(aqStopTimer);
+    if (on) {
+      if (!window.Aquarium.running) window.Aquarium.start(data.site.aquarium, data.media);
+      requestAnimationFrame(() => document.documentElement.classList.add('aquarium'));
+    } else {
+      document.documentElement.classList.remove('aquarium');
+      aqStopTimer = setTimeout(() => window.Aquarium.stop(), 1000); // after the fade-out
+    }
   }
 
   function buildEntries() {

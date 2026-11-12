@@ -4,8 +4,8 @@
    @font-face below, and put its family name in admin → Site → Font.
 ------------------------------------------------------------------- */
 :root {
-  --bg: #ffffff;
-  --fg: #222222;
+  --bg: var(--theme-bg, #ffffff);
+  --fg: var(--theme-fg, #222222);
   --muted: color-mix(in srgb, var(--fg) 45%, var(--bg));
   --rule: color-mix(in srgb, var(--fg) 12%, var(--bg));
   --font: "Neue Haas Grotesk Display Pro", "Helvetica Neue", Helvetica, Inter, Arial, sans-serif;
@@ -26,6 +26,7 @@ body {
   line-height: 1.25;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  transition: color .9s var(--ease), background-color .9s var(--ease);
 }
 a { color: inherit; }
 button.link {
@@ -39,7 +40,7 @@ button.link:hover, a:hover { opacity: .55; }
 
 /* ---------------- carousel menu ---------------- */
 .menu {
-  position: fixed; inset: 0 0 var(--foot-h) 0;
+  position: fixed; inset: 0 0 var(--foot-h) 0; z-index: 1;
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -157,6 +158,32 @@ figcaption .tags { margin-top: 2px; }
 .lb-stage { grid-row: 2; display: grid; place-items: center; min-height: 0; padding: 12px 60px; }
 .lb-stage img, .lb-stage video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .lb-caption { grid-row: 3; text-align: center; min-height: 1.25em; }
+
+/* ---------------- aquarium theme ----------------
+   Colours/images come from admin → Site → Aquarium (as --aq-* variables). */
+html.aquarium { --fg: var(--aq-text); --bg: var(--aq-bottom); }
+#tank, #aq-front { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1s var(--ease); }
+#tank {
+  z-index: 0;
+  background: var(--aq-image, none) center / cover no-repeat, linear-gradient(var(--aq-top, #0f5b73), var(--aq-bottom, #031820));
+}
+#tank::after { /* slow drifting light rays */
+  content: ""; position: absolute; inset: -20% -40%;
+  background: repeating-linear-gradient(100deg, transparent 0 7%, rgba(255,255,255,.05) 9%, transparent 12% 20%);
+  animation: rays 24s linear infinite alternate;
+}
+@keyframes rays { from { transform: translateX(-6%); } to { transform: translateX(6%); } }
+#aq-back, #aq-front { width: 100%; height: 100%; display: block; }
+#aq-front { z-index: 5; }
+html.aquarium #tank, html.aquarium #aq-front { opacity: 1; }
+html.aquarium .foot { background: transparent; }
+html.aquarium .panel {
+  background: color-mix(in srgb, var(--aq-bottom) 70%, transparent);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+}
+html.aquarium.aq-solid .panel { background: var(--aq-bottom); -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.aquarium .lightbox { background: var(--aq-bottom); }
+.foot-left { display: flex; gap: 14px; }
 
 /* ---------------- footer ---------------- */
 .foot {

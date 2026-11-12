@@ -1,14 +1,37 @@
+# Site + Caddy (automatic HTTPS for your own domain).
+# 1. cp .env.example .env   and fill it in
+# 2. point your domain's DNS (A record) at this server
+# 3. docker compose up -d --build
 services:
   portfolio:
     build: .
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     environment:
-      ADMIN_PASSWORD: "change-me"
-      MAX_UPLOAD_MB: "1024"
-      # Set both to "true" once you're behind HTTPS (Caddy/nginx):
-      SECURE_COOKIE: "false"
-      TRUST_PROXY: "false"
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1024}
+      TRUST_PROXY: "true"   # behind Caddy: real visitor IPs + secure cookies over HTTPS
     volumes:
       - ./data:/data
+    # Not published directly; Caddy forwards to it. Uncomment to also reach it on :3000.
+    # ports: ["3000:3000"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [portfolio]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+      UPSTREAM: portfolio:3000
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1024}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

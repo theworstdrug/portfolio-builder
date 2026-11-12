@@ -11,10 +11,14 @@
   <!-- Plain list of sections for screen readers / no-JS. The visual carousel is built by site.js. -->
   <nav class="sr-only" id="sr-nav" aria-label="Sections"></nav>
 
+  <div id="tank" aria-hidden="true"><canvas id="aq-back"></canvas></div>
+
   <main class="menu" id="menu" aria-hidden="true">
     <div class="track" id="track"></div>
     <div class="probe item" id="probe">Mg</div>
   </main>
+
+  <canvas id="aq-front" aria-hidden="true"></canvas>
 
   <aside class="panel" id="panel" aria-labelledby="panel-title">
     <header class="panel-bar">
@@ -35,6 +39,7 @@
   <footer class="foot" id="foot"></footer>
 
   <noscript><p style="padding:1rem">This site needs JavaScript for its menu.</p></noscript>
+  <script src="/js/aquarium.js"></script>
   <script src="/js/site.js"></script>
 </body>
 </html>

@@ -21,11 +21,7 @@ const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 1024);
 const SESSION_HOURS = Number(process.env.SESSION_HOURS || 24 * 7);
 const SECURE_COOKIE = process.env.SECURE_COOKIE === 'true';
 
-let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-if (!ADMIN_PASSWORD) {
-  ADMIN_PASSWORD = crypto.randomBytes(9).toString('base64url');
-  console.warn(`\n[!] ADMIN_PASSWORD is not set. Temporary password for this run: ${ADMIN_PASSWORD}\n`);
-}
+const AUTH_FILE = path.join(DATA_DIR, 'auth.json');
 
 /* ---------- file types ---------- */
 const TYPES = {
@@ -45,6 +41,31 @@ if (!fs.existsSync(CONTENT_FILE)) {
   fs.copyFileSync(path.join(__dirname, 'content.example.json'), CONTENT_FILE);
   console.log(`Created ${CONTENT_FILE} from content.example.json`);
 }
+// Password: once changed from the admin it is stored (scrypt-hashed) in DATA_DIR/auth.json,
+// which then takes priority over the ADMIN_PASSWORD env var.
+let auth = null;
+try { auth = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8')); } catch { /* not set yet */ }
+let ENV_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!auth && !ENV_PASSWORD) {
+  ENV_PASSWORD = crypto.randomBytes(9).toString('base64url');
+  console.warn(`\n[!] ADMIN_PASSWORD is not set. Temporary password for this run: ${ENV_PASSWORD}\n`);
+}
+function checkPassword(pw) {
+  pw = String(pw || '');
+  if (auth) {
+    const h = crypto.scryptSync(pw, Buffer.from(auth.salt, 'hex'), 64);
+    return crypto.timingSafeEqual(h, Buffer.from(auth.hash, 'hex'));
+  }
+  const a = crypto.createHash('sha256').update(pw).digest();
+  const b = crypto.createHash('sha256').update(ENV_PASSWORD).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+async function setPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  auth = { salt: salt.toString('hex'), hash: crypto.scryptSync(pw, salt, 64).toString('hex'), changed: new Date().toISOString() };
+  await fsp.writeFile(AUTH_FILE, JSON.stringify(auth), { mode: 0o600 });
+}
+
 let db; // loaded below, after the validators are defined
 
 let writeChain = Promise.resolve();
@@ -76,7 +97,55 @@ const safeUrl = (u) => {
   return /^(https?:|mailto:|tel:|\/|#)/i.test(u) ? u : u ? 'https://' + u : '';
 };
 
-function cleanSite(s = {}) {
+const num = (v, min, max, def) => { const n = Number(v); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def; };
+const color = (v, def) => (/^#[0-9a-f]{3,8}$/i.test(str(v).trim()) ? str(v).trim() : def);
+const mediaRef = (v, mediaIds) => { v = str(v, 40); return v && (!mediaIds || mediaIds.has(v)) ? v : ''; };
+const FISH_BEHAVIORS = ['cruiser', 'school', 'darter', 'drifter', 'bottom'];
+const DEFAULT_FISH = [
+  { name: 'Goldfish', behavior: 'cruiser', count: 3, size: 70, color: '#f39c3d' },
+  { name: 'Minnows', behavior: 'school', count: 9, size: 22, color: '#a9dcec' },
+  { name: 'Darter', behavior: 'darter', count: 2, size: 38, color: '#ff6b8a' },
+  { name: 'Jelly', behavior: 'drifter', count: 2, size: 46, color: '#f2c9ff' },
+  { name: 'Crab', behavior: 'bottom', count: 1, size: 44, color: '#e0584f' },
+];
+
+function cleanAquarium(a, mediaIds) {
+  const fresh = !a || typeof a !== 'object';
+  a = fresh ? {} : a;
+  const b = a.bubbles || {}, w = a.seaweed || {};
+  return {
+    mode: ['off', 'optional', 'on'].includes(a.mode) ? a.mode : 'optional',
+    background: mediaRef(a.background, mediaIds),
+    top: color(a.top, '#0f5b73'),
+    bottom: color(a.bottom, '#031820'),
+    text: color(a.text, '#e9f6fb'),
+    panel: ['glass', 'solid'].includes(a.panel) ? a.panel : 'glass',
+    bubbles: { amount: num(b.amount, 0, 100, 35), image: mediaRef(b.image, mediaIds) },
+    seaweed: {
+      count: num(w.count, 0, 40, 8),
+      height: num(w.height, 5, 90, 35),
+      front: num(w.front, 0, 100, 20),
+      color: color(w.color, '#2f8f5b'),
+      images: (Array.isArray(w.images) ? w.images : []).map((m) => mediaRef(m, mediaIds)).filter(Boolean).slice(0, 20),
+    },
+    fish: (fresh ? DEFAULT_FISH : Array.isArray(a.fish) ? a.fish : []).slice(0, 20).map((f) => ({
+      id: str(f.id, 40) || id(),
+      name: str(f.name, 80),
+      image: mediaRef(f.image, mediaIds),
+      behavior: FISH_BEHAVIORS.includes(f.behavior) ? f.behavior : 'cruiser',
+      count: num(f.count, 0, 40, 2),
+      size: num(f.size, 8, 400, 50),
+      speed: num(f.speed, 0.1, 5, 1),
+      facing: f.facing === 'left' ? 'left' : 'right',
+      frames: Math.round(num(f.frames, 1, 64, 1)),
+      fps: num(f.fps, 1, 60, 8),
+      layer: f.layer === 'front' ? 'front' : 'back',
+      color: color(f.color, '#f39c3d'),
+    })),
+  };
+}
+
+function cleanSite(s = {}, mediaIds) {
   return {
     title: str(s.title, 200) || 'Portfolio',
     description: str(s.description, 500),
@@ -89,6 +158,7 @@ function cleanSite(s = {}) {
       text: str(s.theme && s.theme.text, 40) || '#222222',
       font: str(s.theme && s.theme.font, 300),
     },
+    aquarium: cleanAquarium(s.aquarium, mediaIds),
   };
 }
 
@@ -155,7 +225,7 @@ function normalizeDb(raw = {}) {
   const mediaIds = new Set(media.map((m) => m.id));
   const sections = uniqueSlugs((Array.isArray(raw.sections) ? raw.sections : []).map((s) => cleanSection(s, mediaIds)));
   sections.forEach((s) => uniqueSlugs(s.projects));
-  return { site: cleanSite(raw.site), sections, media };
+  return { site: cleanSite(raw.site, mediaIds), sections, media };
 }
 
 function touch() {
@@ -169,6 +239,9 @@ function touch() {
 db = normalizeDb(JSON.parse(fs.readFileSync(CONTENT_FILE, 'utf8')));
 
 /* ---------- public view of the content ---------- */
+function aquariumMedia(a) {
+  return [a.background, a.bubbles.image, ...a.seaweed.images, ...a.fish.map((f) => f.image)].filter(Boolean);
+}
 function publicContent() {
   const sections = db.sections.filter((s) => !s.hidden).map((s) => ({
     ...s,
@@ -176,6 +249,7 @@ function publicContent() {
   }));
   const used = new Set();
   sections.forEach((s) => s.projects.forEach((p) => p.media.forEach((m) => used.add(m))));
+  aquariumMedia(db.site.aquarium).forEach((m) => used.add(m));
   const media = {};
   db.media.filter((m) => used.has(m.id)).forEach((m) => {
     media[m.id] = { ...m, src: `/uploads/${m.file}` };
@@ -186,7 +260,6 @@ function publicContent() {
 /* ---------- auth ---------- */
 const sessions = new Map(); // token -> expiry ms
 const loginAttempts = new Map(); // ip -> {count, until}
-const hash = (s) => crypto.createHash('sha256').update(String(s)).digest();
 
 function cookies(req) {
   const out = {};
@@ -211,8 +284,9 @@ function requireAuth(req, res, next) {
   }
   next();
 }
-function setCookie(res, token, maxAgeSec) {
-  res.setHeader('Set-Cookie', `pb_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${SECURE_COOKIE ? '; Secure' : ''}`);
+function setCookie(req, res, token, maxAgeSec) {
+  const secure = SECURE_COOKIE || req.secure;
+  res.setHeader('Set-Cookie', `pb_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${secure ? '; Secure' : ''}`);
 }
 
 /* ---------- app ---------- */
@@ -236,7 +310,7 @@ app.post('/api/login', (req, res) => {
   const ip = req.ip;
   const a = loginAttempts.get(ip) || { count: 0, until: 0 };
   if (a.until > Date.now()) return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' });
-  const ok = crypto.timingSafeEqual(hash(req.body && req.body.password), hash(ADMIN_PASSWORD));
+  const ok = checkPassword(req.body && req.body.password);
   if (!ok) {
     a.count += 1;
     if (a.count >= 5) { a.until = Date.now() + 5 * 60 * 1000; a.count = 0; }
@@ -246,13 +320,13 @@ app.post('/api/login', (req, res) => {
   loginAttempts.delete(ip);
   const token = crypto.randomBytes(32).toString('hex');
   sessions.set(token, Date.now() + SESSION_HOURS * 3600 * 1000);
-  setCookie(res, token, SESSION_HOURS * 3600);
+  setCookie(req, res, token, SESSION_HOURS * 3600);
   res.json({ ok: true });
 });
 
 app.post('/api/logout', (req, res) => {
   sessions.delete(cookies(req).pb_session);
-  setCookie(res, '', 0);
+  setCookie(req, res, '', 0);
   res.json({ ok: true });
 });
 
@@ -265,7 +339,7 @@ app.get('/api/admin/content', requireAuth, (req, res) => {
 app.put('/api/admin/structure', requireAuth, async (req, res) => {
   const mediaIds = new Set(db.media.map((m) => m.id));
   const body = req.body || {};
-  db.site = cleanSite(body.site || db.site);
+  db.site = cleanSite(body.site || db.site, mediaIds);
   db.sections = uniqueSlugs((Array.isArray(body.sections) ? body.sections : []).map((s) => cleanSection(s, mediaIds)));
   db.sections.forEach((s) => uniqueSlugs(s.projects));
   touch();
@@ -320,9 +394,27 @@ app.delete('/api/admin/media/:id', requireAuth, async (req, res) => {
   if (i < 0) return res.status(404).json({ error: 'Not found' });
   const [m] = db.media.splice(i, 1);
   db.sections.forEach((s) => s.projects.forEach((p) => { p.media = p.media.filter((x) => x !== m.id); }));
+  db.site = cleanSite(db.site, new Set(db.media.map((x) => x.id)));
   await save();
   fsp.unlink(path.join(UPLOAD_DIR, m.file)).catch(() => {});
   res.json({ ok: true });
+});
+
+app.post('/api/admin/password', requireAuth, async (req, res) => {
+  const { current, next } = req.body || {};
+  if (!checkPassword(current)) return res.status(400).json({ error: 'Current password is wrong' });
+  if (typeof next !== 'string' || next.length < 8) return res.status(400).json({ error: 'New password needs at least 8 characters' });
+  await setPassword(next);
+  // log out every other session
+  const mine = cookies(req).pb_session;
+  for (const t of sessions.keys()) if (t !== mine) sessions.delete(t);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/backup', requireAuth, (req, res) => {
+  const d = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Disposition', `attachment; filename="portfolio-content-${d}.json"`);
+  res.json(db);
 });
 
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true, index: false, dotfiles: 'deny' }));
