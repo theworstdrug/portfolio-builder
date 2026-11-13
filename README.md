@@ -154,6 +154,21 @@ Everything works without any images, using simple drawn placeholders. To use you
 | Seaweed | Tall transparent PNG/WebP with the base at the bottom. It's sliced into bands that sway, so it bends. Several images are used in turn. You also set the number of strands, the height, and the % drawn **in front of** the menu text. |
 | Fish types | Transparent PNG/WebP facing one direction (tell it which). **Animation:** put frames side by side in one horizontal strip and set *Frames* and *FPS*. Each type also has a count, size, speed, layer (behind or in front of the menu) and placeholder colour. |
 
+**Pixel art:** tick **Pixel art** in the aquarium settings. Images are then scaled by whole numbers only, with no smoothing, and seaweed bends one pixel row at a time. Suggested native sizes (any size works; these just look right on screen):
+
+| Element | Native size | Notes |
+|---|---|---|
+| Small / schooling fish | 8×4 – 12×8 | Set *Size* to 2–3× the width |
+| Cruiser / darter fish | 16×8 – 32×16 | *Size* 3–4× the width, e.g. 32 px art → 96 or 128 |
+| Jellyfish (drifter) | 12×16 – 16×24 | |
+| Crab / bottom walker | 12×8 – 16×12 | |
+| Seaweed | 6–16 wide × 32–96 tall | Height is scaled to a whole multiple of the image |
+| Bubble | 4×4 – 8×8 | |
+| Backdrop | 320×180 or 480×270 (16:9) | Cover-scaled with sharp pixels |
+| Animation | frames side by side, e.g. 4 × (32×16) = 128×16 | *Frames* = 4 |
+
+PNG with transparency and no anti-aliased edges. Keep each frame the same width, and give fish 1 px of empty space around them so they don't get clipped.
+
 Fish behaviours:
 
 - **Cruiser:** swims back and forth, drifts up and down, and scatters from the cursor.

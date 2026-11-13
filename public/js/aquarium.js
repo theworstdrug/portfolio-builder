@@ -10,6 +10,9 @@
  *    and set "Frames" + "FPS".
  *  - Seaweed: a tall image, base at the bottom. It's sliced into bands that sway, so it bends.
  *
+ * Pixel art: turn on "Pixel art" in the admin. Images are then scaled by whole numbers only
+ * with no smoothing, and seaweed bends one pixel row at a time.
+ *
  * Two canvases: "back" sits behind the menu text, "front" sits over the menu (but under
  * the window), so some seaweed / fish can drift in front of the type.
  */
@@ -38,6 +41,7 @@
       this.cfg = config;
       this.media = media || {};
       this.reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.pixel = !!config.pixelated;
       this.back = this.makeCanvas('aq-back');
       this.front = this.makeCanvas('aq-front');
       this.pointer = { x: -9999, y: -9999 };
@@ -104,6 +108,7 @@
         c.el.width = Math.round(this.W * dpr);
         c.el.height = Math.round(this.H * dpr);
         c.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        c.ctx.imageSmoothingEnabled = !this.pixel; // resizing a canvas resets this, so set it here
       }
       if (this.weeds.length) this.placeWeeds();
       if (this.reduce && this.running) this.draw();
@@ -159,6 +164,7 @@
       this.weeds.forEach((w, i) => {
         w.x = ((i + 0.5) / n) * this.W + rand(-0.3, 0.3) * (this.W / n);
         w.h = maxH * rand(0.55, 1);
+        if (w.img && this.pixel) w.h = w.img.height * Math.max(1, Math.round(w.h / w.img.height)); // whole-number scale
         w.w = w.img ? w.h * (w.img.width / w.img.height) : rand(14, 26);
       });
     }
@@ -166,7 +172,11 @@
     makeFish(type, img) {
       const z = type.layer === 'front' ? 1.15 : rand(0.6, 1);
       const dir = Math.random() < 0.5 ? -1 : 1;
-      const size = type.size * z;
+      let size = type.size * z;
+      if (img && this.pixel) { // snap to a whole multiple of the frame width so pixels stay square
+        const fw = img.width / type.frames;
+        size = fw * Math.max(1, Math.round(size / fw));
+      }
       const aspect = img ? (img.height / (img.width / type.frames)) : type.behavior === 'drifter' ? 1.1 : type.behavior === 'bottom' ? 0.6 : 0.5;
       const f = {
         type, img, z, size, aspect, dir,
@@ -331,7 +341,12 @@
     drawBubble(ctx, bb) {
       const x = bb.x + Math.sin(bb.phase) * bb.wob * 0.5;
       if (this.bubbleImg) {
-        ctx.drawImage(this.bubbleImg, x - bb.r, bb.y - bb.r, bb.r * 2, bb.r * 2);
+        if (this.pixel) { // whole-number scale, snapped to the pixel grid
+          const s = this.bubbleImg.width * Math.max(1, Math.round((bb.r * 2) / this.bubbleImg.width));
+          ctx.drawImage(this.bubbleImg, Math.round(x - s / 2), Math.round(bb.y - s / 2), s, s);
+        } else {
+          ctx.drawImage(this.bubbleImg, x - bb.r, bb.y - bb.r, bb.r * 2, bb.r * 2);
+        }
         return;
       }
       ctx.beginPath();
@@ -355,7 +370,8 @@
 
     drawWeed(ctx, w) {
       const base = this.H;
-      const N = w.img ? 28 : 14;
+      // pixel art: one band per pixel row (capped), so the bend steps like a sprite
+      const N = w.img ? (this.pixel ? clamp(w.img.height, 8, 128) : 28) : 14;
       if (w.img) {
         // slice the image into bands and offset each one -> the strand bends
         const iw = w.img.width, ih = w.img.height, bandH = w.h / N;

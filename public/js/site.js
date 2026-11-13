@@ -85,6 +85,7 @@
       const bg = aq.background && data.media[aq.background];
       if (bg) root.setProperty('--aq-image', `url("${bg.src}")`);
       document.documentElement.classList.toggle('aq-solid', aq.panel === 'solid');
+      document.documentElement.classList.toggle('aq-pixel', !!aq.pixelated);
       let pref = null;
       try { pref = sessionStorage.getItem(AQ_KEY); } catch { /* storage blocked */ }
       setAquarium(pref ? pref === 'on' : aq.mode === 'on', false);

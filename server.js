@@ -130,6 +130,7 @@ function cleanAquarium(a, mediaIds) {
     bottom: color(a.bottom, '#031820'),
     text: color(a.text, '#e9f6fb'),
     panel: ['glass', 'solid'].includes(a.panel) ? a.panel : 'glass',
+    pixelated: bool(a.pixelated),
     bubbles: { amount: num(b.amount, 0, 100, 35), image: mediaRef(b.image, mediaIds) },
     seaweed: {
       count: num(w.count, 0, 40, 8),

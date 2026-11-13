@@ -176,6 +176,7 @@ html.aquarium { --fg: var(--aq-text); --bg: var(--aq-bottom); }
 #aq-back, #aq-front { width: 100%; height: 100%; display: block; }
 #aq-front { z-index: 5; }
 html.aquarium #tank, html.aquarium #aq-front { opacity: 1; }
+html.aq-pixel #tank, html.aq-pixel canvas { image-rendering: pixelated; } /* crisp pixel-art backdrop */
 html.aquarium .foot { background: transparent; }
 html.aquarium .panel {
   background: color-mix(in srgb, var(--aq-bottom) 70%, transparent);

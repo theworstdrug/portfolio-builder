@@ -646,6 +646,7 @@
       h('div', { class: 'grid' },
         select('Aquarium', a, 'mode', [['off', 'Off — hidden, no switch'], ['optional', 'Optional — off until a visitor turns it on'], ['on', 'On — visitors can turn it off']]),
         select('Window style', a, 'panel', [['glass', 'Frosted glass'], ['solid', 'Solid']]),
+        h('div', {}, h('label', {}, h('span', {}, ' ')), checkbox('Pixel art: keep pixels sharp (no smoothing)', a, 'pixelated')),
       ),
       h('div', { class: 'grid', style: 'margin-top:12px' },
         colorField('Water (top)', a, 'top'),
